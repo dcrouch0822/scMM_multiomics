@@ -221,72 +221,7 @@ write.csv(seqMetrics, file = seqMetrics.file)
 
 StopWatchEnd$SeqMetrics <- Sys.time()
 
-
-
-
-#########################################
-# Perform cell barcode calling using dropbead
-#########################################
-
-print("")
-print("*********************")
-print("Cell barcode calling")
-print(Sys.time())
-print("********************")
-print("")
-StopWatchStart$CellBarcodeCalling <- Sys.time()
-
-#Read in readcount files
-
-readCounts <- list()
-
-for (i in seq_along(sampleNames)) {
-  
-  readCounts[[i]] <- read.table(paste(bamTagHistogramOutputFolder,
-                                     sampleNames[i],
-                                     ".bam.readcounts.txt.gz", 
-                                     sep = ""), 
-                               header = F, 
-                               stringsAsFactors = FALSE)
-  readCounts[[i]][[1]] <- as.numeric(readCounts[[i]][[1]])
-}
-
-names(readCounts) <- sampleNames
-
-
-#Perform barcode calling
-
-barcodeTotal <- data.frame(rep("", 1))
-
-for (i in seq_along(sampleNames)) {
-
-  barcodeTotal[,i] <- dropbead::estimateCellNumber(readCounts[[i]][[1]], 
-                                          max.cells = 50000)
-
-  }
-
-colnames(barcodeTotal) <- sampleNames
-
-
-##Collect cell barcodes and re-name to match what will be incomming dge barcode names (colnames)
-
-barcodeCalls <- list()
-
-for (i in seq_along(sampleNames)) {
-  
-  barcodesToUse <- barcodeTotal[1,i]
-  tmpPaste <- rep(sampleShortNames[i], barcodesToUse) 
-  tmpBarcodes <- (readCounts[[i]][[2]])[1:barcodesToUse] 
-  barcodeCalls[[i]] <- paste(tmpPaste, tmpBarcodes, sep = "_")
-}
-
-barcodeCalls <- lapply(X = barcodeCalls, function(x) gsub("-1", "", x)) #remove -1
-names(barcodeCalls) <- sampleNames
-
-
-StopWatchEnd$CellBarcodeCalling <- Sys.time()
-
-              
+          
                        
 #########################################
 # Read data and merge into single seurat object 
