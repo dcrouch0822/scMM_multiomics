@@ -7,13 +7,13 @@
 ###########################################################
 ### GENERAL OVERVIEW OF THIS SCRIPT
 ### 1) Collect sequencing metrics outputted by cellranger multi
-### 2) Load in RNA UMI matrix 
-### 3) Load in ADT UMI matrix
-### 4) Load in BCR/TCR data
-### 5) Setup Seurat object (with all multiOMIC data)
-### 6) Add sample-level metadata
-### 7) Add cell-level quality control metrics (%mito, nUMI, nGene) 
-### 8) Add QC flag
+### 2) Load in RNA/ADT UMI matrix 
+### 3) Load in BCR/TCR data
+### 4) Setup Seurat object (with all multiOMIC data)
+### 5) Add sample-level metadata
+### 6) Add cell-level quality control metrics (%mito, nUMI, nGene) 
+### 7) Add QC flag
+### 8) Remove background signal (scAR) -- omit for now 
 ### 9) Output plots
 ### 10) Save data
 
@@ -31,14 +31,14 @@
 ##
 ## module load R/4.1.0
 ##
-## Rscript /cluster/projects/pughlab/projects/projectfolder/scripts/preprocessing.R 
-##    --samples /cluster/projects/pughlab/projects/projectfolder/analysis/projectname_sampleNames.txt \
-##    --cellrangerOutputFolder /cluster/projects/pughlab/projects/projectfolder/cr_outs/ \
-##    --outputDir /cluster/projects/pughlab/projects/projectfolder/analysis/preprocess/ \
-##    --rawDGEinputFolder /cluster/projects/pughlab/projects/projectfolder/cr_outs/ \
-##    --sampleShortNames /cluster/projects/pughlab/projects/projectfolder/analysis/projectname_sampleShortNames.txt \
+## Rscript /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/scripts/preprocessing.R 
+##    --samples /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleNames.txt \
+##    --cellrangerOutputFolder /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/cr_outs/ \
+##    --outputDir /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/preprocess/ \
+##    --rawDGEinputFolder /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/cr_outs/ \
+##    --sampleShortNames /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleShortNames.txt \
 ##    --fileName filename \
-##    --sampleMetaData /cluster/projects/pughlab/projects/projectfolder/analysis/sampleMetaData.csv \
+##    --sampleMetaData /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleMetaData.csv \
 ##    --outputPlots TRUE 
 ##
 ###########################################################
@@ -91,12 +91,6 @@ option_list <- list(make_option("--samples",
                                 default = NULL,
                                 metavar= "character"
                                ),
-                     make_option("--bamTagHistogramOutputFolder",
-                                type = "character",
-                                help = "path to dir with bamtaghistogram outs to read in",
-                                default = NULL,
-                                metavar= "character"
-                               ),
                     make_option("--outputDir",
                                 type = "character",
                                 help = "path to dir where all pipeline outputs will go",
@@ -135,7 +129,6 @@ opt <- parse_args(opt_parser)
 samples <- opt$samples
 fileName <- opt$fileName
 cellrangerOutputFolder <- opt$cellrangerOutputFolder
-bamTagHistogramOutputFolder <- opt$bamTagHistogramOutputFolder
 rawDGEinputFolder <- opt$rawDGEinputFolder
 sampleShortNames <- opt$sampleShortNames
 outputDir <- opt$outputDir
