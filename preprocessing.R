@@ -354,7 +354,7 @@ seurat@meta.data$Sample_ID <- seurat@meta.data$orig.ident
 
 sample.meta.data <- read.csv(sampleMetaData)
 
-samples <- unique(seurat@meta.data$orig.ident) #vector of sample names which is added to "orig.ident" in previous steps
+samples <- unique(seurat@meta.data$Sample_ID) #vector of sample names which is added to "orig.ident" in previous steps
 meta.name <- colnames(sample.meta.data) #name of sample-level metadata (columns)
 
 #set sample.meta.data row order to match samples
@@ -369,7 +369,7 @@ for (i in seq_along(meta.name)) {
   
   for (j in seq_along(samples)) {
     
-    meta[meta$orig.ident %in% samples[j], meta.name[i]] <- sample.meta.data[j,i]
+    meta[meta$Sample_ID %in% samples[j], meta.name[i]] <- sample.meta.data[j,i]
     
   }
   
@@ -398,53 +398,14 @@ print("")
 StopWatchStart$AddQC <- Sys.time()
 
 
-###----ReadCounts
-
-for (i in seq_along(sampleShortNames)) {
-  readCounts[[i]]$V2 <- paste(sampleShortNames[i], 
-                              readCounts[[i]]$V2, 
-                              sep = "_")
-  readCounts[[i]]$V2 <- gsub("-1", "", readCounts[[i]]$V2)
-}
-
-#subset readCounts to be only as long as barcode Total
-
-for (i in seq_along(sampleShortNames)) {
-  readCounts[[i]] <- readCounts[[i]][c(1:barcodeTotal[, i]), ]
-}
-
-#rbind all readCounts into one readCountMeta df
-
-for (i in seq_along(sampleShortNames)) {
-  
-  if (i == 1) {
-    readCountMeta <- as.data.frame(readCounts[[i]], 
-                                   row.names = readCounts[[i]]$V2) 
-    readCountMetaTmp <- readCountMeta
-  }
-  
-  if (i > 1) {
-    readCountMetaTmp <- as.data.frame(readCounts[[i]],
-                                      row.names = readCounts[[i]]$V2) 
-    readCountMeta <- rbind(readCountMeta, readCountMetaTmp)
-  }
-}
-
-rm(readCountMetaTmp)
-readCountMeta$V2 <- NULL
-colnames(readCountMeta) <- "readCounts"
-
-#Add in readCounts metadata
-seurat <- AddMetaData(seurat, readCountMeta, col.name = "readCounts")
-
-
 #Add mito metadata
-seurat[["percent.mt"]] <- PercentageFeatureSet(seurat, pattern = "^mt-")
+seurat[["percent.mt"]] <- PercentageFeatureSet(seurat, pattern = "^MT-")
 
 #Fix nUMI/nGene
-seurat[["nGene"]] <- seurat[["nFeature_RNA"]]
-seurat[["nUMI"]] <- seurat[["nCount_RNA"]]              
-
+seurat[["nGene_RNA"]] <- seurat[["nFeature_RNA"]]
+seurat[["nUMI_RNA"]] <- seurat[["nCount_RNA"]]              
+seurat[["nProtein_ADT"]] <- seurat[["nFeature_ADT"]]
+seurat[["nUMI_ADT"]] <- seurat[["nCount_ADT"]]   
 
 StopWatchEnd$AddQC <- Sys.time()
 
@@ -465,28 +426,27 @@ StopWatchStart$QCFlag <- Sys.time()
                        
 ###Flag outliers of percent.mt 
 
-mitoQC <- WhichCells(seurat, expression = percent.mt > 15)
+mitoQC <- WhichCells(seurat, expression = percent.mt > maxMitoPerCell)
 seurat@meta.data[rownames(seurat@meta.data) %in% mitoQC, "mitoQC"] <- "FAIL"
 seurat@meta.data[is.na(seurat@meta.data$mitoQC), "mitoQC"] <- "PASS"
 
 
 ###Flag outliers of nGene
 
-geneQC <- WhichCells(seurat, expression = nGene < 500)
+geneQC <- WhichCells(seurat, expression = nGene_RNA < minGenesPerCell)
 seurat@meta.data[rownames(seurat@meta.data) %in% geneQC, "geneQC"] <- "FAIL"
 seurat@meta.data[is.na(seurat@meta.data$geneQC), "geneQC"] <- "PASS"
 
 
 ###Flag outliers of nUMI
 
-umiQC <- WhichCells(seurat, expression = nUMI < 1000)
-seurat@meta.data[rownames(seurat@meta.data) %in% umiQC, "umiQC"] <- "FAIL"
-seurat@meta.data[is.na(seurat@meta.data$umiQC), "umiQC"] <- "PASS"
+#umiQC <- WhichCells(seurat, expression = nUMI < 1000)
+#seurat@meta.data[rownames(seurat@meta.data) %in% umiQC, "umiQC"] <- "FAIL"
+#seurat@meta.data[is.na(seurat@meta.data$umiQC), "umiQC"] <- "PASS"
 
 ###Create Cell-level QC flag (Cell_QC)
 
 a <- paste0(seurat@meta.data$nGene_QC,
-            seurat@meta.data$nUMI_QC,
             seurat@meta.data$mitoQC)
 seurat@meta.data$Cell_QC <- ifelse(grepl("FAIL",a),
                                        "FAIL",
@@ -494,7 +454,152 @@ seurat@meta.data$Cell_QC <- ifelse(grepl("FAIL",a),
                                       )                       
 
 StopWatchEnd$QCFlag <- Sys.time()
-                       
+
+
+#########################################
+# Add TCR data
+#########################################
+
+### Load and append TCR data 
+
+clono_metaTMP_TCR <- list()
+clono_metaTMP_BCR <- list()
+
+for (i in seq_along(sampleNames)) {
+  
+  matrix_dir = dataDirTCR[i]
+  
+  #read in all_contig_annotations.csv from cellranger output folder
+  tmp <- read.csv(file = paste0(matrix_dir, "/filtered_contig_annotations.csv"))
+
+  #remove barcoes with non-productive TCRs - working off filtered_contig_annotations so all entries are production 
+  #productive <- tmp[tmp$productive == "True", ]
+  
+  #subset csv to only include barcode name and raw_clonotype_id
+  productive <- productive[, c("barcode", "raw_clonotype_id")]
+  
+  #create another column that combines barcode and raw_clonotype_id so you can ultimately have a unique clonotype for each barcode
+  productive$unique_barcode_clono <- paste(productive$barcode, 
+                                           productive$raw_clonotype_id,
+                                           sep = "_")
+  
+  unique <- unique(productive$unique_barcode_clono)
+  
+  productive_unique <- data.frame(t(data.frame(strsplit(unique, "_")  )))
+  colnames(productive_unique) <- c("barcodes", "raw_clonotype_id")
+  rownames(productive_unique) <- productive_unique[,"barcodes"]
+  #productive_unique$barcodes <- NULL
+  
+  #paste sample name before barcode so it matches seurat dge
+  
+  productive_unique$barcodes <- paste(sampleNames[i], 
+                                       rownames(productive_unique), 
+                                       sep = "_")
+
+  
+  #subset productive_unique dataframe so it only includes barcodes in seurat dge
+  barcodesWithSCdataTMP <- productive_unique[productive_unique$barcodes %in%
+                           rownames(seurat@meta.data), ]
+  
+  rownames(barcodesWithSCdataTMP) <- barcodesWithSCdataTMP$barcodes
+  barcodesWithSCdataTMP$raw_clonotype_id <- paste(sampleNames[i], 
+                                       barcodesWithSCdataTMP$raw_clonotype_id, 
+                                       sep = "_")
+  
+  #create a clonotype metadata list
+
+  clono_metaTMP_TCR[[i]] <- read.csv(file = paste0(matrix_dir, "/clonotypes.csv"))
+  clono_metaTMP_TCR[[i]]$clonotype_id <- paste(sampleNames[i], 
+                                           clono_metaTMP_TCR[[i]]$clonotype_id, 
+                                        sep = "_")
+  
+  
+  clonotype.file <- paste0(sampleNames[i], "./data/", sampleNames[i], "_clono_meta_tcr.csv")
+  write.csv(clono_metaTMP_TCR,  file = clonotype.file)
+  
+  
+  #Add data to seurat object
+  
+  barcodesWithSCdata_TCR <- barcodesWithSCdataTMP
+  barcodesWithSCdata_TCR$barcodes <- NULL
+  
+  subset <- subset(seurat, subset = Sample_ID == sampleNames[i])
+  
+  subset <- AddMetaData(subset, barcodesWithSCdata_TCR, col.name = "raw_clonotype_id")
+  
+  
+  ## ---------------------------- Add in BCR data
+  
+  matrix_dir = dataDirBCR[i]
+  
+  #read in all_contig_annotations.csv from cellranger output folder
+  tmp <- read.csv(file = paste0(matrix_dir, "/filtered_contig_annotations.csv"))
+
+  #remove barcoes with non-productive BCRs - working off filtered_contig_annotations so all entries are production 
+  #productive <- tmp[tmp$productive == "True", ]
+  
+  #subset csv to only include barcode name and raw_clonotype_id
+  productive <- productive[, c("barcode", "raw_clonotype_id")]
+  
+  #create another column that combines barcode and raw_clonotype_id so you can ultimately have a unique clonotype for each barcode
+  productive$unique_barcode_clono <- paste(productive$barcode, 
+                                           productive$raw_clonotype_id,
+                                           sep = "_")
+  
+  unique <- unique(productive$unique_barcode_clono)
+  
+  productive_unique <- data.frame(t(data.frame(strsplit(unique, "_")  )))
+  colnames(productive_unique) <- c("barcodes", "raw_clonotype_id")
+  rownames(productive_unique) <- productive_unique[,"barcodes"]
+  #productive_unique$barcodes <- NULL
+  
+  #paste sample name before barcode so it matches seurat dge
+  
+  productive_unique$barcodes <- paste(sampleNames[i], 
+                                       rownames(productive_unique), 
+                                       sep = "_")
+
+  
+  #subset productive_unique dataframe so it only includes barcodes in seurat dge
+  barcodesWithSCdataTMP <- productive_unique[productive_unique$barcodes %in%
+                           rownames(seurat@meta.data), ]
+  
+  rownames(barcodesWithSCdataTMP) <- barcodesWithSCdataTMP$barcodes
+  barcodesWithSCdataTMP$raw_clonotype_id <- paste(sampleNames[i], 
+                                       barcodesWithSCdataTMP$raw_clonotype_id, 
+                                       sep = "_")
+  
+  #create a clonotype metadata list
+
+  clono_metaTMP_BCR[[i]] <- read.csv(file = paste0(matrix_dir, "/clonotypes.csv"))
+  clono_metaTMP_BCR[[i]]$clonotype_id <- paste(sampleNames[i], 
+                                           clono_metaTMP_BCR[[i]]$clonotype_id, 
+                                        sep = "_")
+  
+  
+  clonotype.file <- paste0(sampleNames[i], "./data/", sampleNames[i], "_clono_meta_bcr.csv")
+  write.csv(clono_metaTMP_BCR,  file = clonotype.file)
+  
+  
+  #Add data to seurat object
+  
+  barcodesWithSCdata_BCR <- barcodesWithSCdataTMP
+  barcodesWithSCdata_BCR$barcodes <- NULL
+  colnames(barcodesWithSCdata_BCR) <- "raw_ig_clonotype_id"
+
+  subset <- AddMetaData(subset, barcodesWithSCdata_BCR, col.name = "raw_ig_clonotype_id")
+  
+    
+  #Save sample-specific seurat object
+
+  seurat.file <- paste0(sampleNames[i], "./data/", sampleNames[i], "_preprocessed_seurat.csv")
+  saveRDS(subset, file = seurat.file)
+
+}
+
+
+
+
                        
 #########################################
 # Output plots
@@ -519,12 +624,12 @@ if(outputPlots == TRUE){
 
     print("1/6....QC plots")
 
-    QC1 <- ggplot(meta, aes(x=nGene, y=nUMI)) +
+    QC1 <- ggplot(meta, aes(x=nGene_RNA, y=nUMI_RNA)) +
           geom_point(size = 0.6, alpha = 0.7) +
           theme(legend.position="none") + theme_classic()
     QC1 <- ggMarginal(QC1, type="histogram")
 
-    QC2 <- ggplot(meta, aes(x=nGene, y=percent.mt)) +
+    QC2 <- ggplot(meta, aes(x=nGene_RNA, y=percent.mt)) +
           geom_point(size = 0.6, alpha = 0.7) +
           theme(legend.position="none") + theme_classic()
     QC2 <- ggMarginal(QC2, type="histogram")
