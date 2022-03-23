@@ -48,7 +48,7 @@
 ##    --sampleShortNames /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleShortNames.txt \
 ##    --sampleMetaData /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleMetaData.csv \
 ##    --minGenesPerCell 200 \
-##    --maxMitoPerCell 0.2 \
+##    --maxMitoPerCell 20 \
 ##    --runDoubletFinder TRUE \
 ##    --outputPlots TRUE 
 ##
@@ -149,7 +149,7 @@ option_list <- list(make_option("--fileName",
                                ),
                     make_option("--maxMitoPerCell",
                                 type = "integer",
-                                help = "maximum fraction of mitochondrial UMIs per cell - will set whether QC flag is added but won't filter out cells",
+                                help = "maximum percentage of mitochondrial UMIs per cell - will set whether QC flag is added but won't filter out cells",
                                 default = NULL,
                                 metavar= "integer"
                                ),     
@@ -453,7 +453,7 @@ for (i in seq_along(sampleNames)) {
   #productive <- tmp[tmp$productive == "True", ]
   
   #subset csv to only include barcode name and raw_clonotype_id
-  productive <- productive[, c("barcode", "raw_clonotype_id")]
+  productive <- tmp[, c("barcode", "raw_clonotype_id")]
   
   #create another column that combines barcode and raw_clonotype_id so you can ultimately have a unique clonotype for each barcode
   productive$unique_barcode_clono <- paste(productive$barcode, 
@@ -467,12 +467,12 @@ for (i in seq_along(sampleNames)) {
   rownames(productive_unique) <- productive_unique[,"barcodes"]
   #productive_unique$barcodes <- NULL
   
-  #paste sample name before barcode so it matches seurat dge
+  #paste sample name before barcode and remove -1 suffix so it matches seurat dge
   
   productive_unique$barcodes <- paste(sampleNames[i], 
                                        rownames(productive_unique), 
                                        sep = "_")
-
+  productive_unique$barcodes <- gsub("-1", "", productive_unique$barcodes)
   
   #subset productive_unique dataframe so it only includes barcodes in seurat dge
   barcodesWithSCdataTMP <- productive_unique[productive_unique$barcodes %in%
@@ -491,7 +491,7 @@ for (i in seq_along(sampleNames)) {
                                         sep = "_")
   
   
-  clonotype.file <- paste0(sampleNames[i], "./data/", sampleNames[i], "_clono_meta_tcr.csv")
+  clonotype.file <- paste0("./data/", sampleNames[i], "_clono_meta_tcr.csv")
   write.csv(clono_metaTMP_TCR,  file = clonotype.file)
   
   
@@ -516,7 +516,7 @@ for (i in seq_along(sampleNames)) {
   #productive <- tmp[tmp$productive == "True", ]
   
   #subset csv to only include barcode name and raw_clonotype_id
-  productive <- productive[, c("barcode", "raw_clonotype_id")]
+  productive <- tmp[, c("barcode", "raw_clonotype_id")]
   
   #create another column that combines barcode and raw_clonotype_id so you can ultimately have a unique clonotype for each barcode
   productive$unique_barcode_clono <- paste(productive$barcode, 
