@@ -47,12 +47,10 @@
 ## module load R/4.1.0
 ##
 ## Rscript /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/scripts/preprocessing.R 
-##    --fileName filename \
 ##    --cellrangerOutputDir /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/cr_outs/ \
 ##    --rawDGEinputDir /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/cr_outs/ \
 ##    --outputDir /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/preprocess/ \
 ##    --samples /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleNames.txt \
-##    --sampleShortNames /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleShortNames.txt \
 ##    --sampleMetaData /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleMetaData.csv \
 ##    --minGenesPerCell 200 \
 ##    --maxMitoPerCell 20 \
@@ -106,13 +104,7 @@ StopWatchEnd$LoadPackages  <- Sys.time()
 #  Parse Options
 #########################################
 
-option_list <- list(make_option("--fileName",
-                                type = "character",
-                                default = NULL,
-                                help = "will be appended to all output files, type NONE is you want to use sampleID",
-                                metavar= "character"
-                               ),
-                    make_option("--cellrangerOutputDir",
+option_list <- list(make_option("--cellrangerOutputDir",
                                 type = "character",
                                 help = "path to dir with cr count outs to read in",
                                 default = NULL,
@@ -134,12 +126,6 @@ option_list <- list(make_option("--fileName",
                                 type = "character",
                                 default = NULL,
                                 help = "path to txt file with column SAMPLEID; each sample on own line",
-                                metavar= "character"
-                               ),
-                    make_option("--sampleShortNames",
-                                type = "character",
-                                help = "path to txt file with column SAMPLEID; each sample on own line",
-                                default = NULL,
                                 metavar= "character"
                                ),
                     make_option("--sampleMetaData",
@@ -178,12 +164,10 @@ option_list <- list(make_option("--fileName",
 opt_parser <- OptionParser(option_list=option_list)
 opt <- parse_args(opt_parser)
 
-fileName <- opt$fileName
 cellrangerOutputDir <- opt$cellrangerOutputDir
 rawDGEinputDir <- opt$rawDGEinputDir
 outputDir <- opt$outputDir
 samples <- opt$samples
-sampleShortNames <- opt$sampleShortNames
 sampleMetaData <- opt$sampleMetaData
 minGenesPerCell <- opt$minGenesPerCell
 maxMitoPerCell <- opt$maxMitoPerCell
@@ -204,8 +188,6 @@ StopWatchStart$SetUpVaribles  <- Sys.time()
 
 sampleNames <- c(as.character(read.table(samples, header = T)$SAMPLEID))
 
-#if(fileName == "NONE"){assign("fileName", sampleNames)} - consider removing this
-#print(paste0("File prefix: ", fileName))
 
 if(length(sampleNames) == 1){
     print(paste0("Sample IDs: ", sampleNames))
@@ -213,13 +195,6 @@ if(length(sampleNames) == 1){
     print(paste0("Sample IDs: ", paste(sampleNames, collapse = ", ")))
 }
 
-#sampleShortNames <- c(as.character(read.table(sampleShortNames, header = T)$SAMPLEID)) -- consider removing sampleSHortNames
-#if(length(sampleShortNames) == 1){
-    print(paste0("Sample IDs: ", sampleShortNames))
-} else if(length(sampleShortNames > 1)){
-    print(paste0("Sample IDs: ", paste(sampleShortNames, collapse = ", ")))
-}
-  
   
 
 dataDirs <- c(paste(cellrangerOutputDir,
