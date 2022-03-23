@@ -5,24 +5,31 @@
 ###########################################################
 
 ###########################################################
-### GENERAL OVERVIEW OF THIS SCRIPT
-### 1) Collect sequencing metrics outputted by cellranger multi
-### 2) Load in RNA/ADT UMI matrix 
-### 3) Load in BCR/TCR data
-### 4) Setup Seurat object (with all multiOMIC data)
-### 5) Add sample-level metadata
-### 6) Add cell-level quality control metrics (%mito, nUMI, nGene) 
-### 7) Add QC flag
-### 8) Remove background signal (scAR) -- omit for now 
-### 9) Output plots
-### 10) Save data
 
 
-### THIS PIPELINE OUTPUTS THE FOLLOWING:
-### 1) Summary of sequencing metrics (csv) 
-### 2) Sample-specific, unfiltered seurat object with QC flags for nGenes, percentMito and doublets. VDJ will have been added to meta.data slot
-### 3) Sample-specific VDJ annotations 
-### 4) Plots
+### ------------ GENERAL OVERVIEW OF THIS SCRIPT
+### Load packages 
+### Parse Options
+### Pipeline Variables
+### Collect sequencing metrics outputted by cellranger multi -- omit for now
+### Read count data and merge into single seurat object 
+### Add metadata
+### Add cell-level quality control metrics 
+### Add QC flag
+### Read VDJ data and add to seurat object
+
+
+### ------------ THIS PIPELINE OUTPUTS THE FOLLOWING:
+### Summary of sequencing metrics (csv) -- omit for now
+### Sample-specific, unfiltered seurat object with QC flags for nGenes and percentMito. 
+### VDJ info for BCR and TCR data has been added to meta.data slot
+### Sample-specific VDJ metadata (csv) 
+
+
+### ------------ PENDING
+### Sequencing metrics from cellranger
+### Doublet calling
+### Plots
 
 
 ###########################################################
@@ -61,7 +68,7 @@ StopWatchStart$Overall  <- Sys.time()
 StopWatchEnd$Overall  <- Sys.time()
 
 #########################################
-# 1) Load packages
+# Load packages
 #########################################
 
 print("")
@@ -251,13 +258,13 @@ for (name in sampleNames) {
 
 
 #########################################
-# Collect sequencing metrics outputted by cellranger count - REMOVED THIS
+# Collect sequencing metrics outputted by cellranger multi -- omit for now
 #########################################
 
           
                        
 #########################################
-# Read data and merge into single seurat object 
+# Read count data and merge into single seurat object 
 #########################################
 
 print("")
@@ -434,7 +441,7 @@ StopWatchEnd$QCFlag <- Sys.time()
 
 
 #########################################
-# Add VDJ data
+# Read VDJ data and add to seurat object
 #########################################
 
 
