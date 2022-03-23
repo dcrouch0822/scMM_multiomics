@@ -29,6 +29,7 @@
 ### ------------ PENDING
 ### Sequencing metrics from cellranger
 ### Doublet calling
+### Background removal
 ### Plots
 
 
