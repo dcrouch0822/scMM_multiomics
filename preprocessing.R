@@ -434,13 +434,14 @@ StopWatchEnd$QCFlag <- Sys.time()
 
 
 #########################################
-# Add TCR data
+# Add VDJ data
 #########################################
 
-### Load and append TCR data 
 
 clono_metaTMP_TCR <- list()
 clono_metaTMP_BCR <- list()
+
+## ---------------------------- Load and append TCR data
 
 for (i in seq_along(sampleNames)) {
   
@@ -495,17 +496,27 @@ for (i in seq_along(sampleNames)) {
   write.csv(clono_metaTMP_TCR,  file = clonotype.file)
   
   
-  #Add data to seurat object
-  
-  barcodesWithSCdata_TCR <- barcodesWithSCdataTMP
-  barcodesWithSCdata_TCR$barcodes <- NULL
+  #Add CDR3_aa data to seurat object meta data 
   
   subset <- subset(seurat, subset = Sample_ID == sampleNames[i])
+
+  barcodesWithSCdata_TCR <- barcodesWithSCdataTMP
+  barcodesWithSCdata_TCR$barcodes <- NULL
+  colnames(barcodesWithSCdata_TCR) <- "raw_tcr_clonotype_id"
+
+  subset <- AddMetaData(subset, barcodesWithSCdata_TCR, col.name = "raw_tcr_clonotype_id")
   
-  subset <- AddMetaData(subset, barcodesWithSCdata_TCR, col.name = "raw_clonotype_id")
+  #Add CDR3_aa data to seurat object meta data 
   
+  for (b in unique(clono_metaTMP_TCR[[1]]$clonotype_id)) {
   
-  ## ---------------------------- Add in BCR data
+  cdr3 <- as.character(clono_metaTMP_TCR[[1]][clono_metaTMP_TCR[[1]]$clonotype_id == b, "cdr3s_aa"])
+  subset@meta.data[subset@meta.data$raw_tcr_clonotype_id %in% b, "cdr3_aa_tcr"] <- cdr3
+
+  }
+
+ 
+  ## ---------------------------- Load and append BCR data
   
   matrix_dir = dataDirBCR[i]
   
@@ -530,11 +541,12 @@ for (i in seq_along(sampleNames)) {
   rownames(productive_unique) <- productive_unique[,"barcodes"]
   #productive_unique$barcodes <- NULL
   
-  #paste sample name before barcode so it matches seurat dge
+  #paste sample name before barcode and remove -1 suffix so it matches seurat dge
   
   productive_unique$barcodes <- paste(sampleNames[i], 
                                        rownames(productive_unique), 
                                        sep = "_")
+  productive_unique$barcodes <- gsub("-1", "", productive_unique$barcodes)
 
   
   #subset productive_unique dataframe so it only includes barcodes in seurat dge
@@ -554,11 +566,11 @@ for (i in seq_along(sampleNames)) {
                                         sep = "_")
   
   
-  clonotype.file <- paste0(sampleNames[i], "./data/", sampleNames[i], "_clono_meta_bcr.csv")
+  clonotype.file <- paste0("./data/", sampleNames[i], "_clono_meta_bcr.csv")
   write.csv(clono_metaTMP_BCR,  file = clonotype.file)
   
   
-  #Add data to seurat object
+  #Add CDR3_aa data to seurat object meta data 
   
   barcodesWithSCdata_BCR <- barcodesWithSCdataTMP
   barcodesWithSCdata_BCR$barcodes <- NULL
@@ -566,107 +578,25 @@ for (i in seq_along(sampleNames)) {
 
   subset <- AddMetaData(subset, barcodesWithSCdata_BCR, col.name = "raw_ig_clonotype_id")
   
-    
+  #Add CDR3_aa data to seurat object meta data 
+  
+  for (c in unique(clono_metaTMP_BCR[[1]]$clonotype_id)) {
+  
+  cdr3 <- as.character(clono_metaTMP_BCR[[1]][clono_metaTMP_BCR[[1]]$clonotype_id == c, "cdr3s_aa"])
+  subset@meta.data[subset@meta.data$raw_ig_clonotype_id %in% c, "cdr3_aa_bcr"] <- cdr3
+
+  }
+
+   
   #Save sample-specific seurat object
 
-  seurat.file <- paste0(sampleNames[i], "./data/", sampleNames[i], "_preprocessed_seurat.csv")
+  seurat.file <- paste0("./data/", sampleNames[i], "_preprocessed_seurat.rds")
   saveRDS(subset, file = seurat.file)
 
 }
 
 
 
-
-                       
-#########################################
-# Output plots
-#########################################
-
-if(outputPlots == TRUE){
-
-    #############
-    print("")
-    print("********************")
-    print("Output Plots")
-    print(Sys.time())
-    print("********************")
-    print("")
-    StopWatchStart$Plotting <- Sys.time()
-
-
-
-    meta <- data.frame(seurat@meta.data)
-
-    #######################
-
-    print("1/6....QC plots")
-
-    QC1 <- ggplot(meta, aes(x=nGene_RNA, y=nUMI_RNA)) +
-          geom_point(size = 0.6, alpha = 0.7) +
-          theme(legend.position="none") + theme_classic()
-    QC1 <- ggMarginal(QC1, type="histogram")
-
-    QC2 <- ggplot(meta, aes(x=nGene_RNA, y=percent.mt)) +
-          geom_point(size = 0.6, alpha = 0.7) +
-          theme(legend.position="none") + theme_classic()
-    QC2 <- ggMarginal(QC2, type="histogram")
-
-
-    qc.plots <- paste0("./figures/",fileName, "_QC.pdf")
-    print(qc.plots)
-    pdf(qc.plots, width = 10, height = 5)
-    print(ggarrange(QC1, QC2, ncol = 2, nrow = 1))
-    dev.off()
-
-    
-    StopWatchEnd$Plotting <- Sys.time()
-
-    }
-
-
-
-
-
-
-
-#########################################
-# Save Data
-#########################################
-
-print("")
-print("********************")
-print("Save Data")
-print(Sys.time())
-print("********************")
-print("")
-StopWatchStart$SaveData <- Sys.time()
-
-print("Raw Counts....")
-raw.count.dir <- paste0("./data/", fileName, "_rawCounts")
-raw <- Matrix(seurat@assays$RNA@counts, sparse = TRUE)
-write10xCounts(path = raw.count.dir,
-               x = raw
-               )
-
-print("Normalized Counts....")
-norm.count.dir <- paste0("./data/", fileName, "_normCounts")
-norm.count <- Matrix(seurat@assays$RNA@data, sparse = TRUE)
-write10xCounts(path = norm.count.dir,
-               x = norm.count
-               )
-
-print("Meta Data....")
-meta <- data.frame(seurat@meta.data)
-meta.file <- paste0("./data/", fileName, "_metaData.csv")
-write.csv(meta, file = meta.file)
-meta.file.2 <- paste0("./data/", fileName, "_metaData.rds")
-saveRDS(meta, file = meta.file.2)
-
-
-
-print("Saving Seurat Object....")
-seurat.file <- paste0("./data/", fileName, "_seurat.rds")
-saveRDS(seurat, file = seurat.file)
 
 StopWatchEnd$SaveData <- Sys.time()
 StopWatchEnd$Overall <- Sys.time()
