@@ -76,7 +76,7 @@ StopWatchStart$LoadPackages  <- Sys.time()
 suppressMessages(library(Seurat))
 suppressMessages(library(ggplot2))
 suppressMessages(library(patchwork))
-suppressMessages(library(doubletFinder))
+#suppressMessages(library(doubletFinder))
 suppressMessages(library(Matrix))
 suppressMessages(library(ggpubr))
 suppressMessages(library(grid))
@@ -85,14 +85,11 @@ suppressMessages(library(reshape2))
 suppressMessages(library(dplyr))
 suppressMessages(library(RColorBrewer))
 suppressMessages(library(gplots))
-suppressMessages(library(heatmap.plus))
 suppressMessages(library(readxl))
-suppressMessages(library(Rmisc))
 suppressMessages(library(stringr))
 suppressMessages(library(Hmisc))
 suppressMessages(library(devtools))
 suppressMessages(library(plyr))
-suppressMessages(library(dropbead))
 suppressMessages(library(optparse))
 
 
@@ -200,8 +197,8 @@ StopWatchStart$SetUpVaribles  <- Sys.time()
 
 sampleNames <- c(as.character(read.table(samples, header = T)$SAMPLEID))
 
-if(fileName == "NONE"){assign("fileName", sampleNames)}
-print(paste0("File prefix: ", fileName))
+#if(fileName == "NONE"){assign("fileName", sampleNames)} - consider removing this
+#print(paste0("File prefix: ", fileName))
 
 if(length(sampleNames) == 1){
     print(paste0("Sample IDs: ", sampleNames))
@@ -209,8 +206,8 @@ if(length(sampleNames) == 1){
     print(paste0("Sample IDs: ", paste(sampleNames, collapse = ", ")))
 }
 
-sampleShortNames <- c(as.character(read.table(sampleShortNames, header = T)$SAMPLEID))
-if(length(sampleShortNames) == 1){
+#sampleShortNames <- c(as.character(read.table(sampleShortNames, header = T)$SAMPLEID)) -- consider removing sampleSHortNames
+#if(length(sampleShortNames) == 1){
     print(paste0("Sample IDs: ", sampleShortNames))
 } else if(length(sampleShortNames > 1)){
     print(paste0("Sample IDs: ", paste(sampleShortNames, collapse = ", ")))
@@ -275,11 +272,12 @@ StopWatchStart$ReadDataMerge <- Sys.time()
 
 for (i in seq_along(sampleNames)) {
   
-  seuratTmp <- Read10X(dataDirCounts[i], strip.suffix = TRUE) #returns the counts matrix with cellnames updated to sampleName_XXXXXXXXX
-  colnames(seuratTmp) <- paste(sampleNames[i], colnames(seuratTmp), sep="_") 
+  data <- Read10X(dataDirCounts[i], strip.suffix = TRUE) #returns the a list with counts matrices for GEX and ADT
+  colnames(data$`Gene Expression`) <- paste(sampleNames[i], colnames(data$`Gene Expression`), sep="_") 
+  colnames(data$`Antibody Capture`) <- paste(sampleNames[i], colnames(data$`Antibody Capture`), sep="_") 
   
-  seuratTmp <- CreateSeuratObject(counts = seuratTmp)
-  
+  seuratTmp <- CreateSeuratObject(counts = data$`Gene Expression`)
+  seuratTmp[['ADT']] <- CreateAssayObject(counts = data$`Antibody Capture`)
   
     if (i == as.integer(1)){
 
@@ -295,37 +293,16 @@ for (i in seq_along(sampleNames)) {
 }
 
 
-#Create separate assay slots for GEX and ADT counts
-
-adt.proteins <- c(grep("Hu-", rownames(seurat@assays$RNA@data), value = T), 
-                  grep("HuMs", rownames(seurat@assays$RNA@data), value = T), 
-                  grep("Isotype", rownames(seurat@assays$RNA@data), value = T))
-
-rna.umi.matrix <- seurat@assays$RNA@data[!rownames(seurat@assays$RNA@data) %in% adt.proteins, ]
-adt.umi.matrix <- seurat@assays$RNA@data[rownames(seurat@assays$RNA@data) %in% adt.proteins, ]
-
-# creates a Seurat object based on the scRNA-seq data
-seurat.object <- CreateSeuratObject(counts = rna.umi.matrix)
-
-# create a new assay to store ADT information
-adt_assay <- CreateAssayObject(counts = adt.umi.matrix)
-
-# add this assay to the previously created Seurat object
-seurat.object[["ADT"]] <- adt_assay
+adt.proteins <- rownames(data$`Antibody Capture`)
+length(adt.proteins)
 
 # Validate that the object now contains multiple assays
-Assays(seurat.object)
+Assays(seurat)
 
 # List the current default assay
-DefaultAssay(seurat.object)
-
-seurat <- seurat.object
+DefaultAssay(seurat)
 
 # Clean up 
-rm(adt_assay)
-rm(rna.umi.matrix)
-rm(adt.umi.matrix)
-rm(seurat.object)
 rm(seuratTmp)
 
 
@@ -354,12 +331,12 @@ seurat@meta.data$Sample_ID <- seurat@meta.data$orig.ident
 
 sample.meta.data <- read.csv(sampleMetaData)
 
-samples <- unique(seurat@meta.data$Sample_ID) #vector of sample names which is added to "orig.ident" in previous steps
+samples_for_meta <- unique(seurat@meta.data$Sample_ID) #vector of sample names which is added to "orig.ident" in previous steps
 meta.name <- colnames(sample.meta.data) #name of sample-level metadata (columns)
 
 #set sample.meta.data row order to match samples
 
-sample.meta.data$Sample_ID <- factor(sample.meta.data$Sample_ID, levels = samples)
+sample.meta.data$Sample_ID <- factor(sample.meta.data$Sample_ID, levels = samples_for_meta)
 sample.meta.data <- sample.meta.data[order(sample.meta.data$Sample_ID), ]
 
 meta <- seurat@meta.data
@@ -367,9 +344,9 @@ meta <- seurat@meta.data
 #lift sample-level metadata over to each cell (row in meta.data)
 for (i in seq_along(meta.name)) {
   
-  for (j in seq_along(samples)) {
+  for (j in seq_along(samples_for_meta)) {
     
-    meta[meta$Sample_ID %in% samples[j], meta.name[i]] <- sample.meta.data[j,i]
+    meta[meta$Sample_ID %in% samples_for_meta[j], meta.name[i]] <- sample.meta.data[j,i]
     
   }
   
@@ -382,8 +359,8 @@ for (i in seq_along(meta.name)) {
 seurat <- AddMetaData(seurat, meta)
 
 StopWatchEnd$AddMetaData <- Sys.time()
-                       
-                       
+
+
                        
 #########################################
 # Add cell-level quality control metrics 
