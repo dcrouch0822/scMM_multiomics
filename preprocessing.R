@@ -17,6 +17,14 @@
 ### 9) Output plots
 ### 10) Save data
 
+
+### THIS PIPELINE OUTPUTS THE FOLLOWING:
+### 1) Summary of sequencing metrics (csv) 
+### 2) Sample-specific, unfiltered seurat object with QC flags for nGenes, percentMito and doublets. VDJ will have been added to meta.data slot
+### 3) Sample-specific VDJ annotations 
+### 4) Plots
+
+
 ###########################################################
 
 ###########################################################
@@ -32,13 +40,16 @@
 ## module load R/4.1.0
 ##
 ## Rscript /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/scripts/preprocessing.R 
-##    --samples /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleNames.txt \
-##    --cellrangerOutputFolder /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/cr_outs/ \
-##    --outputDir /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/preprocess/ \
-##    --rawDGEinputFolder /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/cr_outs/ \
-##    --sampleShortNames /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleShortNames.txt \
 ##    --fileName filename \
+##    --cellrangerOutputDir /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/cr_outs/ \
+##    --rawDGEinputDir /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/cr_outs/ \
+##    --outputDir /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/preprocess/ \
+##    --samples /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleNames.txt \
+##    --sampleShortNames /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleShortNames.txt \
 ##    --sampleMetaData /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleMetaData.csv \
+##    --minGenesPerCell 200 \
+##    --maxMitoPerCell 0.2 \
+##    --runDoubletFinder TRUE \
 ##    --outputPlots TRUE 
 ##
 ###########################################################
@@ -65,6 +76,24 @@ StopWatchStart$LoadPackages  <- Sys.time()
 suppressMessages(library(Seurat))
 suppressMessages(library(ggplot2))
 suppressMessages(library(patchwork))
+suppressMessages(library(doubletFinder))
+suppressMessages(library(Matrix))
+suppressMessages(library(ggpubr))
+suppressMessages(library(grid))
+suppressMessages(library(reshape))
+suppressMessages(library(reshape2))
+suppressMessages(library(dplyr))
+suppressMessages(library(RColorBrewer))
+suppressMessages(library(gplots))
+suppressMessages(library(heatmap.plus))
+suppressMessages(library(readxl))
+suppressMessages(library(Rmisc))
+suppressMessages(library(stringr))
+suppressMessages(library(Hmisc))
+suppressMessages(library(devtools))
+suppressMessages(library(plyr))
+suppressMessages(library(dropbead))
+suppressMessages(library(optparse))
 
 
 StopWatchEnd$LoadPackages  <- Sys.time()
@@ -73,21 +102,21 @@ StopWatchEnd$LoadPackages  <- Sys.time()
 #  Parse Options
 #########################################
 
-option_list <- list(make_option("--samples",
-                                type = "character",
-                                default = NULL,
-                                help = "path to txt file with column SAMPLEID; each sample on own line",
-                                metavar= "character"
-                               ),
-                     make_option("--fileName",
+option_list <- list(make_option("--fileName",
                                 type = "character",
                                 default = NULL,
                                 help = "will be appended to all output files, type NONE is you want to use sampleID",
                                 metavar= "character"
                                ),
-                     make_option("--cellrangerOutputFolder",
+                    make_option("--cellrangerOutputDir",
                                 type = "character",
                                 help = "path to dir with cr count outs to read in",
+                                default = NULL,
+                                metavar= "character"
+                               ),
+                    make_option("--rawDGEinputDir",
+                                type = "character",
+                                help = "same as cellrangerOutputDir",
                                 default = NULL,
                                 metavar= "character"
                                ),
@@ -97,43 +126,65 @@ option_list <- list(make_option("--samples",
                                 default = NULL,
                                 metavar= "character"
                                ),
-                     make_option("--rawDGEinputFolder",
+                    make_option("--samples",
                                 type = "character",
-                                help = "same as cellrangerOutputFolder",
+                                default = NULL,
+                                help = "path to txt file with column SAMPLEID; each sample on own line",
+                                metavar= "character"
+                               ),
+                    make_option("--sampleShortNames",
+                                type = "character",
+                                help = "path to txt file with column SAMPLEID; each sample on own line",
                                 default = NULL,
                                 metavar= "character"
                                ),
-                     make_option("--outputPlots",
-                                type = "logical",
-                                help = "TRUE/FALSE to output plots",
-                                default = NULL,
-                                metavar= "logical"
-                               ),                     
                     make_option("--sampleMetaData",
                                 type = "character",
                                 help = "path to dir where sample level metadata file is located",
                                 default = NULL,
                                 metavar= "character"
                                ),
-                     make_option("--sampleShortNames",
-                                type = "character",
-                                help = "path to txt file with column SAMPLEID; each sample on own line",
+                    make_option("--minGenesPerCell",
+                                type = "integer",
+                                help = "minimum number of genes per cell - will set whether QC flag is added but won't filter out cells",
                                 default = NULL,
-                                metavar= "character"
-                               )
-)
+                                metavar= "integer"
+                               ),
+                    make_option("--maxMitoPerCell",
+                                type = "integer",
+                                help = "maximum fraction of mitochondrial UMIs per cell - will set whether QC flag is added but won't filter out cells",
+                                default = NULL,
+                                metavar= "integer"
+                               ),     
+                    make_option("--runDoubletFinder",
+                                type = "logical",
+                                help = "TRUE/FALSE to run DoubletFinder - will add doublet status in meta.data but won't filter out cells",
+                                default = NULL,
+                                metavar= "logical"
+                               ),
+                    make_option("--outputPlots",
+                                type = "logical",
+                                help = "TRUE/FALSE to output plots",
+                                default = NULL,
+                                metavar= "logical"
+                               ),                     
+                   )
+
 
 opt_parser <- OptionParser(option_list=option_list)
 opt <- parse_args(opt_parser)
 
-samples <- opt$samples
 fileName <- opt$fileName
-cellrangerOutputFolder <- opt$cellrangerOutputFolder
-rawDGEinputFolder <- opt$rawDGEinputFolder
-sampleShortNames <- opt$sampleShortNames
+cellrangerOutputDir <- opt$cellrangerOutputDir
+rawDGEinputDir <- opt$rawDGEinputDir
 outputDir <- opt$outputDir
-outputPlots <- opt$outputPlots
+samples <- opt$samples
+sampleShortNames <- opt$sampleShortNames
 sampleMetaData <- opt$sampleMetaData
+minGenesPerCell <- opt$minGenesPerCell
+maxMitoPerCell <- opt$maxMitoPerCell
+runDoubletFinder <- opt$runDoubletFinder
+outputPlots <- opt$outputPlots
 
 #########################################
 # Pipeline Variables
@@ -148,6 +199,10 @@ print("")
 StopWatchStart$SetUpVaribles  <- Sys.time()
 
 sampleNames <- c(as.character(read.table(samples, header = T)$SAMPLEID))
+
+if(fileName == "NONE"){assign("fileName", sampleNames)}
+print(paste0("File prefix: ", fileName))
+
 if(length(sampleNames) == 1){
     print(paste0("Sample IDs: ", sampleNames))
 } else if(length(sampleNames > 1)){
@@ -161,58 +216,46 @@ if(length(sampleShortNames) == 1){
     print(paste0("Sample IDs: ", paste(sampleShortNames, collapse = ", ")))
 }
   
-dataDir <- c(paste(cellrangerOutputFolder, 
-                   sampleNames, 
-                   "/raw_gene_bc_matrices/testing/", 
-                   sep = ""))
   
-  
-if(fileName == "NONE"){assign("fileName", sampleNames)}
-print(paste0("File prefix: ", fileName))
 
+dataDirs <- c(paste(cellrangerOutputDir,
+                    sampleNames, 
+                    sep = ""))
+
+dataDirCounts <- c(paste(dataDirs,
+                         "/count/sample_feature_bc_matrix/", 
+                         sep = ""))
+
+dataDirTCR <- c(paste(dataDirs, 
+                      "/vdj_t/", 
+                      sep = ""))
+
+dataDirBCR <- c(paste(dataDirs, 
+                      "/vdj_b/", 
+                      sep = ""))
+
+outputPreprocessDirs <- c(paste(sampleNames, 
+                      "/vdj_b/", 
+                      sep = ""))
 
 StopWatchEnd$SetUpVaribles  <- Sys.time()
 
-setwd(outputDir)
-dir.create(fileName)
-setwd(fileName)
-dir.create("data")
-if(outputPlots == TRUE){dir.create("figures")}
 
+for (name in sampleNames) {
 
-#########################################
-# Collect sequencing metrics outputted by cellranger count
-#########################################
-
-print("")
-print("*********************")
-print("Collect sequencing metrics")
-print(Sys.time())
-print("********************")
-print("")
-StopWatchStart$SeqMetrics <- Sys.time()
-
-
-seqMetrics <- data.frame(rep("", 20)) # 20 = number of metrics in summary.csv doc
-
-for (i in seq_along(sampleNames)) {
+ setwd(outputDir)
+ dir.create(name)
+ setwd(name)
+ dir.create("data")
+ if (outputPlots == TRUE){dir.create("figures")}
   
-  seqMetrics[,i] <- t(read.csv(paste(cellrangerOutputFolder, 
-                                     sampleNames[i], 
-                                     "/metrics_summary.csv", sep = "")))
-
 }
 
-colnames(seqMetrics) <- sampleNames
-rownames(seqMetrics) <- rownames(t(read.csv(paste(cellrangerOutputFolder, 
-                                     sampleNames[i], 
-                                     "/metrics_summary.csv", sep = ""))))
-
-seqMetrics.file <- paste0("./data/", fileName, "_seqMetrics.csv")
-write.csv(seqMetrics, file = seqMetrics.file)
 
 
-StopWatchEnd$SeqMetrics <- Sys.time()
+#########################################
+# Collect sequencing metrics outputted by cellranger count - REMOVED THIS
+#########################################
 
           
                        
@@ -228,15 +271,12 @@ print("********************")
 print("")
 StopWatchStart$ReadDataMerge <- Sys.time()
 
-#Load and merge DGEs into a single seurat object
+#Load and merge counts into a single seurat object
 
-for (i in seq_along(sampleShortNames)) {
+for (i in seq_along(sampleNames)) {
   
-  seuratTmp <- Read10X(dataDir[i], strip.suffix = TRUE) #returns the full raw_dge matrix with cellnames updated to ND1_XXXXXXXXX
-  colnames(seuratTmp) <- paste(sampleShortNames[i], colnames(seuratTmp), sep="_") 
-  
-  seuratTmp <- seuratTmp[, colnames(seuratTmp) %in% barcodeCalls[[i]]] #subset to only include cells called from dropbead
-  
+  seuratTmp <- Read10X(dataDirCounts[i], strip.suffix = TRUE) #returns the counts matrix with cellnames updated to sampleName_XXXXXXXXX
+  colnames(seuratTmp) <- paste(sampleNames[i], colnames(seuratTmp), sep="_") 
   
   seuratTmp <- CreateSeuratObject(counts = seuratTmp)
   
@@ -254,12 +294,42 @@ for (i in seq_along(sampleShortNames)) {
 
 }
 
-print("Total Dataset Size")
-print(dim(seurat@assays$RNA@data)) ## print out final size of object                       
 
-StopWatchEnd$ReadDataMerge <- Sys.time()
-                       
-                       
+#Create separate assay slots for GEX and ADT counts
+
+adt.proteins <- c(grep("Hu-", rownames(seurat@assays$RNA@data), value = T), 
+                  grep("HuMs", rownames(seurat@assays$RNA@data), value = T), 
+                  grep("Isotype", rownames(seurat@assays$RNA@data), value = T))
+
+rna.umi.matrix <- seurat@assays$RNA@data[!rownames(seurat@assays$RNA@data) %in% adt.proteins, ]
+adt.umi.matrix <- seurat@assays$RNA@data[rownames(seurat@assays$RNA@data) %in% adt.proteins, ]
+
+# creates a Seurat object based on the scRNA-seq data
+seurat.object <- CreateSeuratObject(counts = rna.umi.matrix)
+
+# create a new assay to store ADT information
+adt_assay <- CreateAssayObject(counts = adt.umi.matrix)
+
+# add this assay to the previously created Seurat object
+seurat.object[["ADT"]] <- adt_assay
+
+# Validate that the object now contains multiple assays
+Assays(seurat.object)
+
+# List the current default assay
+DefaultAssay(seurat.object)
+
+seurat <- seurat.object
+
+# Clean up 
+rm(adt_assay)
+rm(rna.umi.matrix)
+rm(adt.umi.matrix)
+rm(seurat.object)
+rm(seuratTmp)
+
+
+StopWatchEnd$ReadDataMerge <- Sys.time()                     
                        
                        
 #########################################
@@ -274,6 +344,13 @@ print("********************")
 print("")
 StopWatchStart$AddMetaData <- Sys.time()
 
+
+seurat@meta.data$Subject_ID <- gsub("-T.*", "", seurat@meta.data$orig.ident)
+seurat@meta.data$Timepoint <- paste0("T", gsub(".*-T", "", seurat@meta.data$orig.ident))
+seurat@meta.data$Sample_ID <- seurat@meta.data$orig.ident
+
+
+# Add clinical meta data 
 
 sample.meta.data <- read.csv(sampleMetaData)
 
