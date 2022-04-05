@@ -1,24 +1,25 @@
-########################################################################
-#   Script to run harmony plus multi-resolution clustering pipeline    #
-#     L.Richards (multi-res clustering) (D.Croucher mods/harmony)      #
-#                               April 2020                             #
-########################################################################
+############################################################################
+#   Script to run multi-resolution clustering pipeline on multiOMICs data  #
+#     L.Richards (multi-res clustering) D.Croucher (mods/qc/multiomics)    #
+#                             April 2022                                   #
+############################################################################
 
 ###########################################################
 ### GENERAL OVERVIEW OF THIS SCRIPT
-### 1) Loads lineage-subsetted scRNA-seq data (seurat objects)
-### 2) Re-normalize (LogNormalize, scran, scTransform) and re-scale expression matrix
-### 3) Identifies variable genes (vst)
-### 4) Cell cyle scoring
-### 5) Run PCA and determine number of significant PCs (can auto-detect scree)
-### 6) Run Harmony batch correction
-### 7) Non-linear dimensionality reduction (tSNE, UMAP)
-### 8) Cluster cells over range of 6 resolutions
-### 9) Runs differential gene expression (DGE) over all clustering resolutions
-### 10) Calculates silhouette width for clusters
-### 11) Selects optimal clustering resolution based on DE-gene cutoff and max silhouette width
-### 12) Saves data
-### 13) Output plots
+### Load preprocessed scRNA-seq data (seurat objects)
+### Remove flagged cells (based on QC cutoffs from pre-processing script)
+### Normalize gene and protein UMIs 
+### Scale gene expression matrix
+### Identify variable genes (vst)
+### Cell cyle scoring
+### Run PCA and determine number of significant PCs (can auto-detect scree)
+### Non-linear dimensionality reduction (tSNE, UMAP)
+### Cluster cells over range of 6 resolutions
+### Run differential gene expression (DGE) over all clustering resolutions
+### Calculate silhouette width for clusters
+### Select optimal clustering resolution based on DE-gene cutoff and max silhouette width
+### Save data
+### Output plots
 ###########################################################
 
 ###########################################################
@@ -55,6 +56,44 @@
 ##     --markerGenes /cluster/projects/pughlab/projects/scVKMYC/analysis/genelists/CellTypeMarkerGenes_B_PC_Cells.csv \
 ##     --species mouse
 ##
+###########################################################
+
+
+###########################################################
+
+###########################################################
+### EXAMPLE EXECUTION ON H4H
+##
+## #!/bin/bash
+## #SBATCH -t 72:00:00
+## #SBATCH --mem=60G
+## #SBATCH -p himem
+## #SBATCH -c 15
+## #SBATCH -N 1
+##
+## module load R/4.1.0
+##
+## Rscript /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/scripts/multiresclustering.R 
+##     --seuratObj /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/preprocess/ \
+##     --outputDir /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/clustered/ \
+##     --samples /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/ALQ_MCRN007_BCMA_sampleNames.txt \
+##     --applyQCfilter TRUE \
+##     --gene.filtering 0.001 \
+##     --normalizationMethod LogNormalize \
+##     --varsRegress /cluster/projects/pughlab/projects/scVKMYC/analysis/cohort/varsRegress.txt \
+##     --numVarGenes 3000 \
+##     --pcaScalingGenes var \
+##     --computePC 75 \
+##     --numPC 0 \
+##     --addPC 0 \
+##     --outputPlots TRUE \
+##     --minResolution 0.4 \
+##     --maxResolution 1.4 \
+##     --deGeneCutoff 10 \
+##     --fdrCutoff 0.05 \
+##     --optimalCluster TRUE \
+##     --markerGenes /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/genelists/CellTypeMarkerGenes_B_PC_Cells.csv \
+##     --species human
 ###########################################################
 
 ### start clocks
@@ -94,7 +133,16 @@ suppressMessages(library(tidyr))
 suppressMessages(library(dplyr))
 suppressMessages(library(optparse))
 suppressMessages(library(ggrepel))
-suppressMessages(library(harmony))
+suppressMessages(library(patchwork))
+suppressMessages(library(devtools))
+suppressMessages(library(plyr))
+suppressMessages(library(readxl))
+suppressMessages(library(stringr))
+suppressMessages(library(Hmisc))
+suppressMessages(library(grid))
+suppressMessages(library(reshape))
+suppressMessages(library(reshape2))
+suppressMessages(library(gplots))
 
 StopWatchEnd$LoadPackages  <- Sys.time()
 
@@ -109,17 +157,23 @@ option_list <- list(make_option("--seuratObj",
                                 help = "path to seurat object to use as input (post-QC doublets)",
                                 metavar= "character"
                                ),
-                     make_option("--fileName",
-                                type = "character",
-                                default = NULL,
-                                help = "will be appended to all output files, type NONE is you want to use sampleID",
-                                metavar= "character"
-                               ),
                      make_option("--outputDir",
                                 type = "character",
                                 help = "path to dir where all pipeline outputs will go",
                                 default = NULL,
                                 metavar= "character"
+                               ),
+                    make_option("--samples",
+                                type = "character",
+                                default = NULL,
+                                help = "path to txt file with column SAMPLEID; each sample on own line",
+                                metavar= "character"
+                               ),      
+                    make_option("--applyQCfilter",
+                                type = "logical",
+                                help = "TRUE/FALSE to remove cells with FAIL QC flag",
+                                default = NULL,
+                                metavar= "logical"
                                ),
                     make_option("--gene.filtering",
                                 type = "double",
@@ -223,8 +277,9 @@ opt_parser <- OptionParser(option_list=option_list)
 opt <- parse_args(opt_parser)
 
 seuratObj <- opt$seuratObj
-fileName <- opt$fileName
 outputDir <- opt$outputDir
+samples <- opt$samples
+applyQCfilter <- opt$applyQCfilter
 gene.filtering <- opt$gene.filtering
 normalizationMethod <- opt$normalizationMethod
 varsRegress <- opt$varsRegress
@@ -242,25 +297,6 @@ optimalCluster <- opt$optimalCluster
 markerGenes <- opt$markerGenes
 species <- opt$species
 
-#########################################
-# Set up parallization
-#########################################
-
-print("")
-print("********************")
-print("Setup Parallelization with future")
-print(Sys.time())
-print("********************")
-print("")
-StopWatchStart$Parallelize  <- Sys.time()
-
-CoresAvailable <- as.numeric(availableCores()[[1]])
-print(paste0(CoresAvailable, " Cores Available"))
-plan("multicore", workers = CoresAvailable)
-options(future.globals.maxSize = 10 * 1024 ^ 3)
-#plan()
-
-StopWatchEnd$Parallelize  <- Sys.time()
 
 
 #########################################
@@ -275,13 +311,24 @@ print("********************")
 print("")
 StopWatchStart$SetUpVaribles  <- Sys.time()
 
-print(paste0("Path to seurat object: ", seuratObj))
 
-print(paste0("File prefix: ", fileName))
+sampleNames <- c(as.character(read.table(samples, header = T)$SAMPLEID))
 
-print(paste0("Output directory: ", outputDir))
-print(paste0("Lowly Expressed Gene Cutoff: ", gene.filtering))
-print(paste0("Normalization Method: ", normalizationMethod))
+
+if(length(sampleNames) == 1){
+    print(paste0("Sample IDs: ", sampleNames))
+} else if(length(sampleNames > 1)){
+    print(paste0("Sample IDs: ", paste(sampleNames, collapse = ", ")))
+}
+
+
+seuratDirs <- c(paste0(seuratObj,
+                       sampleNames, 
+                       "/data/",
+                       sampleNames,
+                       "_preprocessed_seurat.rds"))
+
+print(paste0("Path to seurat object: ", seuratDirs))
 
 
 if (varsRegress == "NONE"){
@@ -297,6 +344,9 @@ if (varsRegress == "NONE"){
 }
 
 
+print(paste0("Output directory: ", outputDir))
+print(paste0("Lowly Expressed Gene Cutoff: ", gene.filtering))
+print(paste0("Normalization Method: ", normalizationMethod))
 print(paste0("Number Variable Genes: ", numVarGenes))
 print(paste0("Genes used for PCA and scaling: ", pcaScalingGenes))
 print(paste0("Number of PCs to compute: ", computePC))
@@ -323,15 +373,19 @@ if (markerGenes == "NONE"){
 
 StopWatchEnd$SetUpVaribles  <- Sys.time()
 
-setwd(outputDir)
-dir.create(fileName)
-setwd(fileName)
-dir.create("data")
-if(outputPlots == TRUE){dir.create("figures")}
+for (name in sampleNames) {
+
+ setwd(outputDir)
+ dir.create(name)
+ setwd(name)
+ dir.create("data")
+ if (outputPlots == TRUE){dir.create("figures")}
+  
+}
 
 
 #########################################
-# Loads lineage-subsetted scRNA-seq data (seurat objects)
+# Load preprocessed scRNA-seq data (seurat objects)
 #########################################
 
 print("")
@@ -343,12 +397,31 @@ print("")
 StopWatchStart$ReadData <- Sys.time()
 
 
-seurat.obj <- readRDS(seuratObj)
+seurat.obj <- readRDS(seuratDirs)
 
 print("Total Dataset Size")
 print(dim(seurat.obj@assays$RNA@data)) ## print out final size of object
-  
+
 StopWatchEnd$ReadData <- Sys.time()
+
+
+#########################################
+# Remove flagged cells (based on QC cutoffs from pre-processing script)
+#########################################
+
+print("")
+print("********************")
+print("Remove Failed QC Cells")
+print(Sys.time())
+print("********************")
+print("")
+StopWatchStart$RemoveFlaggedCells <- Sys.time()
+
+print(table(seurat.obj@meta.data$Cell_QC))
+seurat.obj <- subset(seurat.obj , subset = Cell_QC == "PASS")
+print(dim(seurat.obj@assays$RNA@data))
+
+StopWatchEnd$RemoveFlaggedCells <- Sys.time()
 
 
 
@@ -369,15 +442,18 @@ StopWatchStart$FilterGenes <- Sys.time()
 nCells <- mean((table(seurat.obj@meta.data$Sample_ID))) * gene.filtering
 print(paste0("Cutoff: ", gene.filtering, " of average cell size (", round(nCells, 2), " cells)"))
 
-seurat.obj <- CreateSeuratObject(counts = seurat.obj@assays$RNA@counts,
-                                 meta.data = seurat.obj@meta.data,
+tmp <- seurat.obj
+seurat.obj <- CreateSeuratObject(counts = tmp@assays$RNA@counts,
+                                 meta.data = tmp@meta.data,
                                  min.cells = nCells
                                 )
+seurat.obj[['ADT']] <- CreateAssayObject(counts = tmp@assays$ADT@counts)
 
-#seurat.obj@assays$RNA@counts <- seurat.obj@assays$RNA@counts[rowSums(as.matrix(seurat.obj@assays$RNA@counts > 0)) >= nCells, ]
-#seurat.obj@assays$RNA@data <- seurat.obj@assays$RNA@data[rownames(seurat.obj@assays$RNA@counts), ]
 print(dim(seurat.obj@assays$RNA@counts))
 print(dim(seurat.obj@assays$RNA@data))
+
+print(dim(seurat.obj@assays$ADT@counts))
+print(dim(seurat.obj@assays$ADT@data))
 
 StopWatchEnd$FilterGenes <- Sys.time()
 
@@ -388,103 +464,19 @@ StopWatchEnd$FilterGenes <- Sys.time()
 
 StopWatchStart$Normalization <- Sys.time()
 
-if(normalizationMethod == "scran"){
 
+print("")
+print("********************")
+print("Normalize Data")
+print(Sys.time())
+print("********************")
+print("")
 
-    print("")
-    print("********************")
-    print("Normalize Data with Scran")
-    print(Sys.time())
-    print("********************")
-    print("")
-
-    # convert seurat counts to SingleCellExperiment object
-    sce <- SingleCellExperiment(assays = list(counts = as.matrix(x = seurat.obj@assays$RNA@counts)))
-
-    # quick cluster first; scran noramlizes within size factor pools
-    # minClusterSize <- 0.05*ncol(seurat.obj@assays$RNA@counts)
-    # print(paste0("Minimum Cluster Size for quickCluster: ", minClusterSize))
-    minClusterSize <- 25
-    print(paste0("Minimum Cluster Size for quickCluster: ", 25))
-
-    clusters <- quickCluster(sce,
-                             method = "igraph",
-                             min.size= minClusterSize #hard coded to 25
-                        )
-    print(paste0("Identified ", length(unique(clusters)), " clusters..."))
-
-    print("Computing Sum Factors...")
-    sce <- computeSumFactors(sce, cluster=clusters)
-
-    print("Normalizing...")
-    #sce <- scater::normalize(sce, return_log = FALSE)
-    # without log transform
-    sce <- scater::logNormCounts(sce, log = FALSE)
-
-    print("Update Master Seurat Object....")
-    #add scran normalized counts into seurat obj
-    seurat.obj <- NormalizeData(object = seurat.obj,
-                                normalization.method = "LogNormalize",
-                                scale.factor = 10000
-                               )
-
-    #backup Seurat's and scran (pre-log) norm data
-    seurat.obj@misc[["seurat_norm_data"]] <- as.matrix(x = seurat.obj@assays$RNA@data)
-    seurat.obj@misc[["scran_norm_data_noLog"]] <- as.matrix(assay(sce, "normcounts"))
-
-    #replace normalized data with scran
-    seurat.obj@assays$RNA@data <- log(x = assay(sce, "normcounts") + 1)
-    print(paste0("Consistency Check....",
-                 identical(rownames(seurat.obj@assays$RNA@data),
-                          rownames(seurat.obj@assays$RNA@counts))
-         ))
-
-    #add size factors from scran into metadata
-    sizeFactors <- data.frame(sizeFactors(sce))
-    colnames(sizeFactors) <- "scran_SizeFactor"
-    rownames(sizeFactors) <- colnames(counts(sce))
-    seurat.obj <- AddMetaData(seurat.obj, metadata = sizeFactors)
-
-    #remove scran intermediate files to free up mem
-    rm(sce)
-    rm(clusters)
-    rm(sizeFactors)
-
-} else if(normalizationMethod == "LogNormalize"){
-
-
-    print("")
-    print("********************")
-    print("Normalize Data with Seurat LogNormalize")
-    print(Sys.time())
-    print("********************")
-    print("")
-
-    seurat.obj <- NormalizeData(object = seurat.obj,
-                                normalization.method = "LogNormalize",
-                                scale.factor = 10000
-                               )
-
-
-} else if(normalizationMethod == "scTransform"){
-
-
-    print("")
-    print("********************")
-    print("Normalize Data with Seurat scTransform")
-    print(Sys.time())
-    print("********************")
-    print("")
-    print(paste0("Regressing out....", paste(vars.regress, collapse = ", ")))
-    print(paste0("Using fixed number of variable genes... ", numVarGenes))
-    seurat.obj <- SCTransform(seurat.obj,
-                              new.assay.name = "SCT",
-                              vars.to.regress = vars.regress,
-                              variable.features.n = numVarGenes,
-                              verbose = TRUE
-                              #variable.features.rv.th = 1.3
-                             )
-}
+seurat.obj <- NormalizeData(object = seurat.obj,
+                            normalization.method = "LogNormalize",
+                            scale.factor = 10000
+                           )
+seurat.obj <- NormalizeData(seurat.obj, assay = "ADT", normalization.method = 'CLR', margin = 2)
 
 
 StopWatchEnd$Normalization <- Sys.time()
