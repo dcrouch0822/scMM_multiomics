@@ -33,7 +33,7 @@
 ## #SBATCH -N 1
 ## #SBATCH --account=pughlab
 ##
-## module load R/3.6.1
+## module load R/4.1.0
 ##
 ## Rscript /cluster/projects/pughlab/projects/scVKMYC/scripts/harmony_multires_clustering_pipeline.R \
 ##     --seuratObj /cluster/projects/pughlab/projects/scVKMYC/analysis/test/lineages/scVKMYC_test_lineages/B_PC/scVKMYC_test_lineages_B_PC_seurat.rds  \
@@ -399,8 +399,11 @@ StopWatchStart$ReadData <- Sys.time()
 
 seurat.obj <- readRDS(seuratDirs)
 
-print("Total Dataset Size")
+print("Total Gene Expression Dataset Size")
 print(dim(seurat.obj@assays$RNA@data)) ## print out final size of object
+
+print("Total Protein Expression Dataset Size")
+print(dim(seurat.obj@assays$ADT@data)) ## print out final size of object
 
 StopWatchEnd$ReadData <- Sys.time()
 
@@ -688,31 +691,11 @@ if(normalizationMethod == "scTransform"){
 StopWatchEnd$PCA <- Sys.time()
 
 
-#########################################
-# Batch correction (harmony)
-#########################################
-
-print("")
-print("********************")
-print("Running batch correction")
-print(Sys.time())
-print("********************")
-print("")
-
-# https://htmlpreview.github.io/?https://github.com/satijalab/seurat.wrappers/blob/master/docs/harmony.html
-# http://htmlpreview.github.io/?https://github.com/immunogenomics/harmony/blob/master/docs/advanced.html
-
-StopWatchStart$harmony <- Sys.time()
-seurat.obj <- RunHarmony(seurat.obj, "SeqBatch", plot_convergence = F, )
-StopWatchEnd$harmony <- Sys.time()
-
-
-
 
 
 
 #########################################
-# tSNE and UMAP
+# tSNE and UMAP ------ RELOAD UP TO HERE
 #########################################
 
 print("")
