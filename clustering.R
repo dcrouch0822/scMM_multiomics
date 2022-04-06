@@ -27,45 +27,6 @@
 ##
 ## #!/bin/bash
 ## #SBATCH -t 72:00:00
-## #SBATCH --mem=300G
-## #SBATCH -p superhimem
-## #SBATCH -c 50
-## #SBATCH -N 1
-## #SBATCH --account=pughlab
-##
-## module load R/4.1.0
-##
-## Rscript /cluster/projects/pughlab/projects/scVKMYC/scripts/harmony_multires_clustering_pipeline.R \
-##     --seuratObj /cluster/projects/pughlab/projects/scVKMYC/analysis/test/lineages/scVKMYC_test_lineages/B_PC/scVKMYC_test_lineages_B_PC_seurat.rds  \
-##     --fileName scVKMYC_test_multires_harmony \
-##     --outputDir /cluster/projects/pughlab/projects/scVKMYC/analysis/lineages/scVKMYC_test_lineages/B_PC/ \
-##     --gene.filtering 0.001 \
-##     --normalizationMethod LogNormalize \
-##     --varsRegress /cluster/projects/pughlab/projects/scVKMYC/analysis/cohort/varsRegress.txt \
-##     --numVarGenes 3000 \
-##     --pcaScalingGenes var \
-##     --computePC 75 \
-##     --numPC 0 \
-##     --addPC 0 \
-##     --outputPlots TRUE \
-##     --minResolution 1 \
-##     --maxResolution 3.5 \
-##     --deGeneCutoff 15 \
-##     --fdrCutoff 0.05 \
-##     --optimalCluster TRUE \
-##     --markerGenes /cluster/projects/pughlab/projects/scVKMYC/analysis/genelists/CellTypeMarkerGenes_B_PC_Cells.csv \
-##     --species mouse
-##
-###########################################################
-
-
-###########################################################
-
-###########################################################
-### EXAMPLE EXECUTION ON H4H
-##
-## #!/bin/bash
-## #SBATCH -t 72:00:00
 ## #SBATCH --mem=60G
 ## #SBATCH -p himem
 ## #SBATCH -c 15
@@ -89,9 +50,10 @@
 ##     --outputPlots TRUE \
 ##     --minResolution 0.4 \
 ##     --maxResolution 1.4 \
+##     --optimalCluster FALSE \
+##     --selectedResolution 0.4 \
 ##     --deGeneCutoff 10 \
 ##     --fdrCutoff 0.05 \
-##     --optimalCluster TRUE \
 ##     --markerGenes /cluster/projects/pughlab/projects/ALQ_MCRN007_BCMA/scomics/analysis/genelists/CellTypeMarkerGenes_B_PC_Cells.csv \
 ##     --species human
 ###########################################################
@@ -259,6 +221,12 @@ option_list <- list(make_option("--seuratObj",
                                 help = "TRUE/FALSE to select optimal clustering solution?",
                                 metavar= "charater"
                                 ),
+                    make_option("--selectedResolution",
+                                type = "integer",
+                                default = NULL,
+                                help = "selected clustering resolution; ie. 1.0",
+                                metavar= "integer"
+                               ),
                    make_option("--markerGenes",
                                 type = "character",
                                 default = NULL,
@@ -272,6 +240,8 @@ option_list <- list(make_option("--seuratObj",
                                 metavar= "charater"
                                )
 )
+
+
 
 opt_parser <- OptionParser(option_list=option_list)
 opt <- parse_args(opt_parser)
@@ -294,6 +264,7 @@ maxResolution <- opt$maxResolution
 deGeneCutoff <- opt$deGeneCutoff
 fdrCutoff <- opt$fdrCutoff
 optimalCluster <- opt$optimalCluster
+selectedResolution <- opt$selectedResolution
 markerGenes <- opt$markerGenes
 species <- opt$species
 
@@ -695,7 +666,7 @@ StopWatchEnd$PCA <- Sys.time()
 
 
 #########################################
-# tSNE and UMAP ------ RELOAD UP TO HERE
+# tSNE and UMAP 
 #########################################
 
 print("")
@@ -749,26 +720,17 @@ seurat.obj <- FindNeighbors(seurat.obj,
                            )
 
 print(paste0("Find Clusters with ", pc.use, " PCs..."))
-print(paste0("Clustering over a range of resolutions..."))
 
-
-#Seurat recommends 0.4-1.2 resolution for 300k cells
-#calculate 6 even ranges between to range specified by user
-
-res.range <- round(seq(minResolution,
-                       maxResolution,
-                       length.out = 6
-                      ),
-                   2)
-print(res.range)
 
 seurat.obj <- FindClusters(seurat.obj,
-                           resolution = 0.4, #picking this for now - can adjust later
+                           resolution = selectedResolution, 
                            #method = "igraph", #better for large data
                            algorithm = 1, #default Louvian algorithm,
                            verbose = FALSE,
                            n.start = 50
                           )
+
+seurat.obj@meta.data$Optimal_res <- selectedResolution
 
 ##fix naming in meta.data
 
@@ -909,7 +871,7 @@ if(outputPlots == TRUE){
     VAR1 <- VariableFeaturePlot(seurat.obj)
     VAR2 <- LabelPoints(plot = VAR1, points = top20, repel = TRUE)
 
-    var.pdf <- paste0("./figures/", fileName, "_VarGenes.pdf")
+    var.pdf <- paste0("./figures/", sampleNames, "_VarGenes.pdf")
     print(var.pdf)
     pdf(var.pdf, width = 10, height = 8)
     print(VAR2)
@@ -917,102 +879,37 @@ if(outputPlots == TRUE){
 
     #######################
 
-    print("3/6....PCA Scree Plot")
+    #print("3/6....PCA Scree Plot")
 
-    pc.pdf <- paste0("./figures/", fileName, "_PCA_plots.pdf")
-    print(pc.pdf)
-    pdf(pc.pdf, width = 10, height = 5)
-    par(mfrow=c(1,2))
+    #pc.pdf <- paste0("./figures/", sampleNames, "_PCA_plots.pdf")
+    #print(pc.pdf)
+    #pdf(pc.pdf, width = 10, height = 5)
+    #par(mfrow=c(1,2))
 
-            plot(pca$PC,
-                 pca$st.dev,
-                 xlab = "Principal Components",
-                 ylab = "Standard Deviation",
-                 main = fileName
-                    )
-            abline(v=round(pc.use), lty = 2)
-            legend("topright",
-                   legend = c(paste0(round(pc.use), " PCs")),
-                   bty = 'n')
+     #       plot(pca$PC,
+     #            pca$st.dev,
+     #            xlab = "Principal Components",
+     #            ylab = "Standard Deviation",
+     #            main = fileName
+     #               )
+     #       abline(v=round(pc.use), lty = 2)
+     #       legend("topright",
+     #              legend = c(paste0(round(pc.use), " PCs")),
+     #              bty = 'n')
 
-        plot(pca$PC,
-             pca$prop.var,
-             xlab = "Principal Components",
-             ylab = "Proportion Variance"
-            )
-        abline(v=round(pc.use), lty = 2)
-        legend("topright",
-               legend = c(paste0(round(sum(pca$prop.var[1:round(pc.use)]), 3), " cumulative variance")),
-               bty = 'n')
-
-    dev.off()
-
-
-
-    #######################
-    if (optimalCluster == TRUE){
-
-    print("4/6....Optimal Clustering Dashboard")
-
-    nClusters <- c()
-    resolutions <- unique(deGenes$resolution)
-
-    cols <- ifelse(resolutions == unique(meta$Optimal_res), "#7fcdbb", "grey")
-
-    for (i in 1:length(unique(deGenes$resolution))){
-        nClusters[i] <- nrow(deGenes[deGenes$resolution == resolutions[i], ])
-    }
-
-    plot.dat <- data.frame(nClusters, resolutions)
-    plot.dat$resolutions <- factor(plot.dat$resolutions)
-
-    dashboard.1 <- ggplot(plot.dat, aes (x=resolutions, y = nClusters)) +
-                    geom_bar(stat = "identity", color = "black", fill = cols) + theme_classic() +
-                     geom_text(aes(label=nClusters), vjust=1.6, color = "black", size=3.5)+
-                    xlab("") + ylab("Clusters") +
-                    theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
-                    ggtitle(fileName)
-
-    ##### boxplot of DE genes
-    deGenes$resolution <- factor(deGenes$resolution)
-
-    dashboard.2 <- ggplot(deGenes, aes (x=resolution, y = nDEGenes)) +
-                   geom_boxplot(outlier.shape = NA, fill = cols) + theme_classic() +
-                 #geom_text(aes(label=nClusters), vjust=1.6, color = "white", size=3.5)+
-                    xlab("") + ylab("DE Genes / Cluster") +
-                    theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
-                    geom_jitter(shape=16, position=position_jitter(0.2)) +
-                    geom_hline(yintercept = deGeneCutoff, col = "red", lty = 2)
+#        plot(pca$PC,
+#             pca$prop.var,
+#             xlab = "Principal Components",
+#             ylab = "Proportion Variance"
+#            )
+#        abline(v=round(pc.use), lty = 2)
+#        legend("topright",
+#               legend = c(paste0(round(sum(pca$prop.var[1:round(pc.use)]), 3), " cumulative variance")),
+#               bty = 'n')
+#
+#    dev.off()
 
 
-    dashboard.3 <- ggplot(deGenes, aes (x=resolution, y = sil_median)) +
-                   geom_boxplot(outlier.shape = NA, fill = cols) + theme_classic() +
-                     #geom_text(aes(label=nClusters), vjust=1.6, color = "white", size=3.5)+
-                    xlab("Resolutions") +
-                    ylab("Median Silhouette Width / Cluster") +
-                    theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
-                    geom_jitter(shape=16, position=position_jitter(0.2))
-                    #geom_hline(yintercept = deGeneCutoff, col = "red", lty = 2)
-
-    dashboard.pdf <- paste0("./figures/", fileName, "_ClusterResolution_Dashboard.pdf")
-    print(dashboard.pdf)
-
-    pdf(dashboard.pdf, width = 10, height = 10)
-
-    print(ggarrange(dashboard.1,
-              dashboard.2,
-              dashboard.3,
-              ncol = 1,
-              nrow = 3
-             ))
-
-    dev.off()
-
-    } else if (optimalCluster == FALSE){
-
-      print("4/6....Skip Plotting Optimal Clustering Dashboard")
-
-    }
     #######################
 
     print("5/6.....tSNEs and UMAPs")
@@ -1022,35 +919,35 @@ if(outputPlots == TRUE){
 
     meta <- seurat.obj@meta.data
     meta$cluster <- meta[ ,colnames(meta) == paste0("Seurat_cluster_res.", unique(meta$Optimal_res))]
-    clust.col <- colnames(meta)[grep(unique(meta$cluster), colnames(meta))]
+    #clust.col <- colnames(meta)[grep(unique(meta$cluster), colnames(meta))]
     cent <- meta %>% group_by(cluster) %>% select(tSNE_1, tSNE_2) %>% summarize_all(median)
     
   tsne.c <- ggplot(meta, aes_string(x="tSNE_1", y = "tSNE_2", col = "cluster")) +
             geom_point(alpha = 0.5) + theme_classic() +
             theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
-            labs("Clusters") + ggtitle(paste0(fileName, " - Cluster: res ", unique(meta$Optimal_res),  " (", nrow(meta), " cells)")) +
+            labs("Clusters") + ggtitle(paste0(sampleNames, " - Cluster: res ", unique(meta$Optimal_res),  " (", nrow(meta), " cells)")) +
             geom_label_repel(aes(label = cluster), data = cent, show.legend = F, size = 2)  +
             theme(legend.position='none') 
   
-  tsne.s <- ggplot(meta, aes_string(x="tSNE_1", y = "tSNE_2", col = "Sample_ID")) +
-            geom_point(alpha = 0.5) + theme_classic() +
-            theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
-            labs("Samples") + ggtitle(paste0(fileName, " - Sample ID: res ", unique(meta$Optimal_res),  " (", nrow(meta), " cells)")) 
-            #geom_label_repel(aes(label = Sample_ID), data = cent, show.legend = F, size = 2)  +
-            #theme(legend.position='none') 
+#  tsne.s <- ggplot(meta, aes_string(x="tSNE_1", y = "tSNE_2", col = "Sample_ID")) +
+#            geom_point(alpha = 0.5) + theme_classic() +
+#            theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
+#            labs("Samples") + ggtitle(paste0(sampleNames, " - Sample ID: res ", unique(meta$Optimal_res),  " (", nrow(meta), " cells)")) 
+#            #geom_label_repel(aes(label = Sample_ID), data = cent, show.legend = F, size = 2)  +
+#            #theme(legend.position='none') 
   
-  tsne.d <- ggplot(meta, aes_string(x="tSNE_1", y = "tSNE_2", col = "Cohort_ID")) +
-            geom_point(alpha = 0.5) + theme_classic() +
-            theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
-            labs("Disease Group") + ggtitle(paste0(fileName, " - Disease Group: res ", unique(meta$Optimal_res),  " (", nrow(meta), " cells)")) 
-            #geom_label_repel(aes(label = Cohort_ID), data = cent, show.legend = F, size = 2)  +
-            #theme(legend.position='none') 
+#  tsne.d <- ggplot(meta, aes_string(x="tSNE_1", y = "tSNE_2", col = "Cohort_ID")) +
+#            geom_point(alpha = 0.5) + theme_classic() +
+#            theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
+#            labs("Disease Group") + ggtitle(paste0(sampleNames, " - Disease Group: res ", unique(meta$Optimal_res),  " (", nrow(meta), " cells)")) 
+#            #geom_label_repel(aes(label = Cohort_ID), data = cent, show.legend = F, size = 2)  +
+#            #theme(legend.position='none') 
 
-  tsne.pdf <- paste0("./figures/", fileName, "_tSNE.pdf")
+  tsne.pdf <- paste0("./figures/", sampleNames, "_tSNE.pdf")
   pdf(tsne.pdf, width = 10, height = 10)
   print(tsne.c)
-  print(tsne.s)
-  print(tsne.d)
+#  print(tsne.s)
+#  print(tsne.d)
   dev.off()
 
   
@@ -1063,63 +960,63 @@ if(outputPlots == TRUE){
   umap.c <- ggplot(meta, aes_string(x="UMAP_1", y = "UMAP_2", col = "cluster")) +
             geom_point(alpha = 0.5) + theme_classic() +
             theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
-            labs("Clusters") + ggtitle(paste0(fileName, " - Cluster: res ", unique(meta$Optimal_res),  " (", nrow(meta), " cells)")) +
+            labs("Clusters") + ggtitle(paste0(sampleNames, " - Cluster: res ", unique(meta$Optimal_res),  " (", nrow(meta), " cells)")) +
             geom_label_repel(aes(label = cluster), data = cent, show.legend = F, size = 2)  +
             theme(legend.position='none') 
   
-  umap.s <- ggplot(meta, aes_string(x="UMAP_1", y = "UMAP_2", col = "Sample_ID")) +
-            geom_point(alpha = 0.5) + theme_classic() +
-            theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
-            labs("Samples") + ggtitle(paste0(fileName, " - Sample ID: res ", unique(meta$Optimal_res),  " (", nrow(meta), " cells)")) 
-            #geom_label_repel(aes(label = Sample_ID), data = cent, show.legend = F, size = 2)  +
-            #theme(legend.position='none') 
+ # umap.s <- ggplot(meta, aes_string(x="UMAP_1", y = "UMAP_2", col = "Sample_ID")) +
+ #           geom_point(alpha = 0.5) + theme_classic() +
+ #           theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
+ #           labs("Samples") + ggtitle(paste0(sampleNames, " - Sample ID: res ", unique(meta$Optimal_res),  " (", nrow(meta), " cells)")) 
+ #           #geom_label_repel(aes(label = Sample_ID), data = cent, show.legend = F, size = 2)  +
+ #           #theme(legend.position='none') 
   
- umap.d <- ggplot(meta, aes_string(x="UMAP_1", y = "UMAP_2", col = "Cohort_ID")) +
-            geom_point(alpha = 0.5) + theme_classic() +
-            theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
-            labs("Disease Group") + ggtitle(paste0(fileName, " - Disease Group: res ", unique(meta$Optimal_res),  " (", nrow(meta), " cells)")) 
-            #geom_label_repel(aes(label = Cohort_ID), data = cent, show.legend = F, size = 2)  +
-            #theme(legend.position='none') 
+ # umap.d <- ggplot(meta, aes_string(x="UMAP_1", y = "UMAP_2", col = "Cohort_ID")) +
+ #           geom_point(alpha = 0.5) + theme_classic() +
+ #           theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
+ #           labs("Disease Group") + ggtitle(paste0(sampleNames, " - Disease Group: res ", unique(meta$Optimal_res),  " (", nrow(meta), " cells)")) 
+ #           #geom_label_repel(aes(label = Cohort_ID), data = cent, show.legend = F, size = 2)  +
+ #           #theme(legend.position='none') 
 
-  umap.pdf <- paste0("./figures/", fileName, "_UMAP.pdf")
+  umap.pdf <- paste0("./figures/", sampleNames, "_UMAP.pdf")
   pdf(umap.pdf, width = 10, height = 10)
   print(umap.c)
-  print(umap.s)
-  print(umap.d)  
+  #print(umap.s)
+  #print(umap.d)  
   dev.off()
   
   
   
-    tsne.tiff <- paste0("./figures/", fileName, "_Cluster_tSNE.tiff")
+    tsne.tiff <- paste0("./figures/", sampleNames, "_Cluster_tSNE.tiff")
     tiff(tsne.tiff, width = 700, height = 600)
     print(tsne.c)
     dev.off()
   
-    tsne.tiff <- paste0("./figures/", fileName, "_Sample_tSNE.tiff")
-    tiff(tsne.tiff, width = 700, height = 600)
-    print(tsne.s)
-    dev.off()
+#    tsne.tiff <- paste0("./figures/", sampleNames, "_Sample_tSNE.tiff")
+#    tiff(tsne.tiff, width = 700, height = 600)
+#    print(tsne.s)
+#    dev.off()
 
-    tsne.tiff <- paste0("./figures/", fileName, "_Cohort_tSNE.tiff")
-    tiff(tsne.tiff, width = 700, height = 600)
-    print(tsne.d)
-    dev.off()
+#    tsne.tiff <- paste0("./figures/", sampleNames, "_Cohort_tSNE.tiff")
+#    tiff(tsne.tiff, width = 700, height = 600)
+#    print(tsne.d)
+#    dev.off()
 
   
-    umap.tiff <- paste0("./figures/", fileName, "_Cluster_umap.tiff")
+    umap.tiff <- paste0("./figures/", sampleNames, "_Cluster_umap.tiff")
     tiff(umap.tiff, width = 700, height = 600)
     print(umap.c)
     dev.off()
   
-    umap.tiff <- paste0("./figures/", fileName, "_Sample_umap.tiff")
-    tiff(umap.tiff, width = 700, height = 600)
-    print(umap.s)
-    dev.off()
+ #   umap.tiff <- paste0("./figures/", sampleNames, "_Sample_umap.tiff")
+ #   tiff(umap.tiff, width = 700, height = 600)
+ #   print(umap.s)
+ #   dev.off()
 
-    umap.tiff <- paste0("./figures/", fileName, "_Cohort_umap.tiff")
-    tiff(umap.tiff, width = 700, height = 600)
-    print(umap.d)
-    dev.off()
+ #   umap.tiff <- paste0("./figures/", sampleNames, "_Cohort_umap.tiff")
+ #   tiff(umap.tiff, width = 700, height = 600)
+ #   print(umap.d)
+ #   dev.off()
   
   
   #######################
@@ -1135,13 +1032,13 @@ if(outputPlots == TRUE){
         print(sigs)
 
         #### UMAP with marker gene expression in hexbin
-        markers.pdf <- paste0("./figures/", fileName, "_GeneMarkers_UMAP.pdf")
+        markers.pdf <- paste0("./figures/", sampleNames, "_GeneMarkers_UMAP.pdf")
         print(markers.pdf)
         pdf(markers.pdf, height = 5, width = 5)
 
         for (i in 1:length(sigs)){
 
-                plot.title <-  paste(sigs[i], "\n", fileName, "  ", nrow(meta), "cells")
+                plot.title <-  paste(sigs[i], "\n", sampleNames, "  ", nrow(meta), "cells")
                 p <-  ggplot(meta, aes_string(x="UMAP_1", y="UMAP_2", z=sigs[i])) +
                         stat_summary_hex(bins=100, fun = "mean") +
                          theme_classic(base_size=8) +
@@ -1155,13 +1052,13 @@ if(outputPlots == TRUE){
         dev.off()
 
        #### tSNE with marker gene expression in hexbin
-      markers.pdf.t <- paste0("./figures/", fileName, "_GeneMarkers_tSNE.pdf")
+      markers.pdf.t <- paste0("./figures/", sampleNames, "_GeneMarkers_tSNE.pdf")
       print(markers.pdf.t)
       pdf(markers.pdf.t, height = 5, width = 5)
 
         for (i in 1:length(sigs)){
 
-                plot.title <-  paste(sigs[i], "\n", fileName, "  ", nrow(meta), "cells")
+                plot.title <-  paste(sigs[i], "\n", sampleNames, "  ", nrow(meta), "cells")
                 p <-  ggplot(meta, aes_string(x="tSNE_1", y="tSNE_2", z=sigs[i])) +
                         stat_summary_hex(bins=100, fun = "mean") +
                          theme_classic(base_size=8) +
@@ -1192,7 +1089,7 @@ for (i in seq_along(sigs)) {
     
     meta_ordered <- meta[order(meta[,goi], decreasing = F), ]
 
-    plot.title <-  paste(goi, "\n", fileName, "  ", nrow(meta), "cells")
+    plot.title <-  paste(goi, "\n", sampleNames, "  ", nrow(meta), "cells")
     
     p <-  ggplot(meta_ordered, aes_string(x="tSNE_1", y="tSNE_2", z=goi)) +
                         stat_summary_hex(bins=100, fun = "mean") +
@@ -1202,7 +1099,7 @@ for (i in seq_along(sigs)) {
                         ggtitle(plot.title) + labs(z = goi)
                 print(p)
     
-    mypath <- paste0("./markers/", fileName, "_", goi, "_GeneMarkers_tSNE.tiff")
+    mypath <- paste0("./markers/", sampleNames, "_", goi, "_GeneMarkers_tSNE.tiff")
 
     tiff(file=mypath)
     print(p)
@@ -1219,7 +1116,7 @@ for (i in seq_along(sigs)) {
     
     meta_ordered <- meta[order(meta[,goi], decreasing = F), ]
 
-    plot.title <-  paste(goi, "\n", fileName, "  ", nrow(meta), "cells")
+    plot.title <-  paste(goi, "\n", sampleNames, "  ", nrow(meta), "cells")
     
     p <-  ggplot(meta_ordered, aes_string(x="UMAP_1", y="UMAP_2", z=goi)) +
                         stat_summary_hex(bins=100, fun = "mean") +
@@ -1229,7 +1126,7 @@ for (i in seq_along(sigs)) {
                         ggtitle(plot.title) + labs(z = goi)
                 print(p)
     
-    mypath <- paste0("./markers/", fileName, "_", goi, "_GeneMarkers_UMAP.tiff")
+    mypath <- paste0("./markers/", sampleNames, "_", goi, "_GeneMarkers_UMAP.tiff")
 
     tiff(file=mypath)
     print(p)
