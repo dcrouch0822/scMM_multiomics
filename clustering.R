@@ -1028,7 +1028,10 @@ if(outputPlots == TRUE){
 
         print("6/6.....Marker Gene Expression")
 
-        sigs <- colnames(meta)[colnames(meta) %in% marker.genes$GENE]
+        sigs <- marker.genes$GENE
+        sigs <- gsub("Hu.", "adt_Hu.", sigs)
+        sigs <- gsub("-", ".", sigs)
+        sigs <- sigs[sigs %in% colnames(meta)]
         print(sigs)
 
         #### UMAP with marker gene expression in hexbin
