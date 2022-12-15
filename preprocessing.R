@@ -158,7 +158,7 @@ option_list <- list(make_option("--cellrangerOutputDir",
                                 help = "TRUE/FALSE to output plots",
                                 default = NULL,
                                 metavar= "logical"
-                               ),                     
+                               )                    
                    )
 
 
@@ -306,7 +306,7 @@ StopWatchStart$AddMetaData <- Sys.time()
 
 
 seurat@meta.data$Subject_ID <- gsub("-T.*", "", seurat@meta.data$orig.ident)
-seurat@meta.data$Timepoint <- paste0("T", gsub(".*-T", "", seurat@meta.data$orig.ident))
+seurat@meta.data$Timepoint <- paste0("T", gsub(".*-T", "", seurat@meta.data$orig.ident)) #consider gsubing the -O part of (says T0-O) 
 seurat@meta.data$Sample_ID <- seurat@meta.data$orig.ident
 
 
@@ -456,7 +456,7 @@ for (i in seq_along(sampleNames)) {
   productive_unique$barcodes <- paste(sampleNames[i], 
                                        rownames(productive_unique), 
                                        sep = "_")
-  productive_unique$barcodes <- gsub("-1", "", productive_unique$barcodes)
+  productive_unique$barcodes <- gsub("-1$", "", productive_unique$barcodes)
   
   #subset productive_unique dataframe so it only includes barcodes in seurat dge
   barcodesWithSCdataTMP <- productive_unique[productive_unique$barcodes %in%
@@ -529,7 +529,7 @@ for (i in seq_along(sampleNames)) {
   productive_unique$barcodes <- paste(sampleNames[i], 
                                        rownames(productive_unique), 
                                        sep = "_")
-  productive_unique$barcodes <- gsub("-1", "", productive_unique$barcodes)
+  productive_unique$barcodes <- gsub("-1$", "", productive_unique$barcodes)
 
   
   #subset productive_unique dataframe so it only includes barcodes in seurat dge
